@@ -58,5 +58,5 @@ class PiSwapMarket(Account):
         return self.lp.remove_liquidity(account, amount_lt)
 
     @log
-    def swap(self, account, tokenIn, tokenOut, amount):
-        return self.lp.swap(account, tokenIn, tokenOut, amount)
+    def swap(self, account, token, buy, amount):
+        return self.lp.swap(account, token, buy, amount)

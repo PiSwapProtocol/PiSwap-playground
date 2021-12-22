@@ -58,17 +58,19 @@ class LiquidityPool(Account):
         self.transfer(TokenType.BEAR, account, amount_bear)
         return amount_eth, amount_bull, amount_bear
 
-    def swap(self, account, tokenIn, tokenOut, amount):
-        if tokenIn == TokenType.LIQUIDITY or tokenOut == TokenType.LIQUIDITY:
-            raise Exception("Swap does not support liquidity tokens")
-        if tokenIn == TokenType.BULL and tokenOut == TokenType.BEAR or tokenIn == TokenType.BEAR and tokenOut == TokenType.BULL:
-            raise Exception("Swap does not support bull/bear swap")
+    def swap(self, account, token, buy, amount):
+        if token == TokenType.LIQUIDITY or token == TokenType.ETH:
+            raise Exception("Only specify bull or bear")
 
-        buy = tokenIn == TokenType.ETH
-        token = tokenOut if buy else tokenIn
+        tokenIn = TokenType.ETH
+        tokenOut = token
         eth_reserve = self.getEthReserve(token)
-        reserveIn = eth_reserve if buy else self.balances[token]
-        reserveOut = self.balances[token] if buy else eth_reserve
+        reserveIn = eth_reserve
+        reserveOut = self.balances[token]
+        # swap reserves if selling
+        if not buy:
+            reserveIn, reserveOut = reserveOut, reserveIn
+            tokenIn, tokenOut = tokenOut, tokenIn
 
         invariant = self.balances[token] * eth_reserve
         # new pool sizes
