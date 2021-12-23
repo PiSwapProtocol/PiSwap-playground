@@ -27,7 +27,6 @@ def bold(text):
 
 
 def info(instance, account):
-    print("_________________________________________________\n")
     print(bold(f"Token price"))
     print(
         f'Mint: {blue(price_for_1_token(instance.bull_bear_supply))} {red(price_for_1_token(instance.bull_bear_supply))}')

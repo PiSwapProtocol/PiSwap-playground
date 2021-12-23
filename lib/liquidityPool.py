@@ -7,6 +7,11 @@ class LiquidityPool(Account):
     def __init__(self):
         super().__init__("Swap", 0)
         self.lt_supply = 0
+        self.weights = {
+            TokenType.ETH: 0.5,
+            TokenType.BULL: 0.25,
+            TokenType.BEAR: 0.25
+        }
 
     def initialize_pool(self, account, amount, amount_bull, amount_bear):
         if self.lt_supply != 0:
