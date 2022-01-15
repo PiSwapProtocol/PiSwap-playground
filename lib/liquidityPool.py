@@ -1,19 +1,22 @@
+import math
+from decimal import Decimal, getcontext
+
 from lib.account import Account
 from lib.formula import *
-from lib.types import TokenType
+from lib.types import SwapKind, TokenType
+from lib.utils import complement
+
+getcontext().prec = 18
 
 
 class LiquidityPool(Account):
     def __init__(self):
         super().__init__("Swap", 0)
-        self.lt_supply = 0
-        self.weights = {
-            TokenType.ETH: 0.5,
-            TokenType.BULL: 0.25,
-            TokenType.BEAR: 0.25
-        }
+        self.MAX_RATIO = Decimal("0.3")
+        self.lt_supply = Decimal(0)
+        self.eth_weight = Decimal(1/3)
 
-    def initialize_pool(self, account, amount, amount_bull, amount_bear):
+    def initializePool(self, account: Account, amount: Decimal, amount_bull: Decimal, amount_bear: Decimal) -> Decimal:
         if self.lt_supply != 0:
             raise Exception("Pool already initialized")
 
@@ -27,7 +30,7 @@ class LiquidityPool(Account):
         self.lt_supply += amount
         return amount
 
-    def add_liquidity(self, account, amount):
+    def addLiquidity(self, account: Account, amount: Decimal) -> Decimal:
         if self.lt_supply == 0:
             raise Exception("Pool not initialized yet")
 
@@ -49,7 +52,7 @@ class LiquidityPool(Account):
         self.lt_supply += liquidity_minted
         return liquidity_minted
 
-    def remove_liquidity(self, account, amount_lt):
+    def removeLiquidity(self, account: Account, amount_lt: Decimal) -> Decimal:
         liquidity_removed = amount_lt / self.lt_supply
 
         amount_eth = self.balances[TokenType.ETH] * liquidity_removed
@@ -63,56 +66,83 @@ class LiquidityPool(Account):
         self.transfer(TokenType.BEAR, account, amount_bear)
         return amount_eth, amount_bull, amount_bear
 
-    def swap(self, account, token, buy, amount):
-        if token == TokenType.LIQUIDITY or token == TokenType.ETH:
-            raise Exception("Only specify bull or bear")
+    def adjustWeights(f):
+        def decorator(self, account: Account, tokenIn: TokenType, tokenOut: TokenType, kind: SwapKind, amount: Decimal) -> Decimal:
+            priceBull = self.spotPrice(TokenType.ETH, TokenType.BULL)
+            priceBear = self.spotPrice(TokenType.ETH, TokenType.BEAR)
 
-        tokenIn = TokenType.ETH
-        tokenOut = token
-        eth_reserve = self.getEthReserve(token)
-        reserveIn = eth_reserve
-        reserveOut = self.balances[token]
-        # swap reserves if selling
-        if not buy:
-            reserveIn, reserveOut = reserveOut, reserveIn
-            tokenIn, tokenOut = tokenOut, tokenIn
+            result = f(self, account, tokenIn, tokenOut, kind, amount)
 
-        invariant = self.balances[token] * eth_reserve
-        # new pool sizes
-        newReserveIn = reserveIn + amount
-        newReserveOut = invariant / newReserveIn
+            if (tokenIn is TokenType.ETH or tokenOut is TokenType.ETH):
+                newWeightEth = calculate_new_weights(
+                    priceBull, priceBear, self.balances[TokenType.BULL], self.balances[TokenType.BEAR], self.balances[TokenType.ETH])
+                self.eth_weight = newWeightEth
+            return result
+        return decorator
 
-        amountOut = reserveOut - newReserveOut
-        account.transfer(tokenIn, self, amount)
-        self.transfer(tokenOut, account, amountOut)
-        return amountOut
+    @adjustWeights
+    def swap(self, account: Account, tokenIn: TokenType, tokenOut: TokenType, kind: SwapKind, amount: Decimal) -> Decimal:
+        if tokenIn == TokenType.LIQUIDITY or tokenOut == TokenType.LIQUIDITY:
+            raise Exception("Cannot swap liquidity tokens")
+        if tokenIn == tokenOut:
+            raise Exception("Cannot swap same token")
 
-    def getEthReserve(self, tokenType):
-        if tokenType == TokenType.LIQUIDITY or tokenType == TokenType.ETH:
-            raise Exception("Cannot get reserve for liquidity or eth")
+        if kind == SwapKind.GIVEN_IN:
+            amountOut = self.calcOutGivenIn(tokenIn, tokenOut, amount)
+            account.transfer(tokenIn, self, amount)
+            self.transfer(tokenOut, account, amountOut)
+            return amountOut
+        else:
+            amountIn = self.calcInGivenOut(tokenIn, tokenOut, amount)
+            account.transfer(tokenIn, self, amountIn)
+            self.transfer(tokenOut, account, amount)
+            return amountIn
 
-        token_pool_size = self.balances[TokenType.BULL] + \
-            self.balances[TokenType.BEAR]
-        return (self.balances[TokenType.BEAR if tokenType == TokenType.BULL else TokenType.BULL] / token_pool_size) * self.balances[TokenType.ETH]
+    def calcOutGivenIn(self, tokenIn: TokenType, tokenOut: TokenType, amountIn: Decimal) -> Decimal:
+        balanceIn = self.balances[tokenIn]
+        balanceOut = self.balances[tokenOut]
+        weightIn = self.getWeight(tokenIn)
+        weightOut = self.getWeight(tokenOut)
 
-    def price_for_1_token(self, tokenType):
-        eth_pool = self.getEthReserve(tokenType)
-        return (self.balances[tokenType] * eth_pool)/(self.balances[tokenType] - 1) - eth_pool
+        if (amountIn > balanceIn * self.MAX_RATIO):
+            raise Exception("MAX_RATIO")
 
-    def sell_eth_price(self, tokenType, eth_amount):
-        invariant = self.balances[tokenType] * \
-            self.getEthReserve(tokenType)
-        # calculate new pool sizes
-        new_eth_pool = self.getEthReserve(tokenType) + eth_amount
-        new_token_pool = invariant / new_eth_pool
-        # tokens paid out to account
-        return self.balances[tokenType] - new_token_pool
+        denominator = balanceIn + amountIn
+        base = balanceIn / denominator
+        exponent = weightIn / weightOut
+        power = base**exponent
+        return balanceOut * complement(power)
 
-    def sell_token_price(self, tokenType, token_amount):
-        invariant = self.balances[tokenType] * \
-            self.getEthReserve(tokenType)
-        # calculate new pool sizes
-        new_token_pool = self.balances[tokenType] + token_amount
-        new_eth_pool = invariant / new_token_pool
-        # eth paid out to account
-        return self.getEthReserve(tokenType) - new_eth_pool
+    def calcInGivenOut(self, tokenIn: TokenType, tokenOut: TokenType, amountOut: Decimal) -> Decimal:
+        balanceIn = self.balances[tokenIn]
+        balanceOut = self.balances[tokenOut]
+        weightIn = self.getWeight(tokenIn)
+        weightOut = self.getWeight(tokenOut)
+
+        if (amountOut > balanceOut * self.MAX_RATIO):
+            raise Exception("MAX_RATIO")
+
+        base = balanceOut / (balanceOut - amountOut)
+        exponent = weightOut / weightIn
+        power = base**exponent
+        ratio = power - 1
+
+        return balanceIn * ratio
+
+    def spotPrice(self, tokenIn: TokenType, tokenOut: TokenType) -> Decimal:
+        if tokenIn == TokenType.LIQUIDITY or tokenOut == TokenType.LIQUIDITY:
+            raise Exception("Cannot swap liquidity tokens")
+
+        balanceIn = self.balances[tokenIn]
+        balanceOut = self.balances[tokenOut]
+        weightIn = self.getWeight(tokenIn)
+        weightOut = self.getWeight(tokenOut)
+        a = balanceIn / weightIn
+        b = balanceOut / weightOut
+        return a/b
+
+    def getWeight(self, token: TokenType) -> Decimal:
+        if token is TokenType.ETH:
+            return self.eth_weight
+        else:
+            return Decimal((1 - self.eth_weight) / 2)
