@@ -19,7 +19,7 @@ class PiSwapMarket(Account):
         self.bull_bear_supply = 0
 
     def failsafe(f):
-        def decorator(self, account: Account, *args, log=True, txLog=None, **kwargs):
+        def decorator(self, account: Account, *args, log=True, txLog=None, simulate=False, **kwargs):
             swap_balance = self.balances.copy()
             lp_balance = self.lp.balances.copy()
             weight = self.lp.eth_weight
@@ -33,6 +33,12 @@ class PiSwapMarket(Account):
                 if (log):
                     print()
                     l.info(self)
+                if simulate:
+                    # restore balances
+                    self.balances = swap_balance
+                    self.lp.balances = lp_balance
+                    self.lp.eth_weight = weight
+                    account.balances = investor_balance
             except Exception as e:
                 print(get_traceback(e))
                 # restore balances
