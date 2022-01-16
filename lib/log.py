@@ -38,11 +38,11 @@ def info(m) -> None:
     if (m.lp.balances[TokenType.ETH] != 0):
         print(bold(f"Pool sizes"))
         print(
-            f'ETH: {round(m.lp.balances[TokenType.ETH], 5)} tokens / Weight {round(m.lp.getWeight(TokenType.ETH), 5)}')
+            f'ETH: {m.lp.balances[TokenType.ETH]} tokens / Weight {m.lp.getWeight(TokenType.ETH)}')
         print(
-            f'{blue("BULL")}: {round(m.lp.balances[TokenType.BULL], 5)} tokens / Weight {round(m.lp.getWeight(TokenType.BULL), 5)}')
+            f'{blue("BULL")}: {m.lp.balances[TokenType.BULL]} tokens / Weight {m.lp.getWeight(TokenType.BULL)}')
         print(
-            f'{red("BEAR")}: {round(m.lp.balances[TokenType.BEAR], 5)} tokens / Weight {round(m.lp.getWeight(TokenType.BEAR), 5)}')
+            f'{red("BEAR")}: {m.lp.balances[TokenType.BEAR]} tokens / Weight {m.lp.getWeight(TokenType.BEAR)}')
         print("_________________________________________________\n")
     if (m.lp.balances[TokenType.ETH] == 0):
         print("Cannot get NFT price, swap not initialized")
