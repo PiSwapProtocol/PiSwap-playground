@@ -30,7 +30,7 @@ def bold(text) -> str:
 def info(m) -> None:
     print(bold(f"Token price"))
     print(
-        f'Mint: {blue(price_for_1_token(m.bull_bear_supply))} {red(price_for_1_token(m.bull_bear_supply))}')
+        f'Mint: {blue(price_for_1_token(m.bull_bear_supply)/2)} {red(price_for_1_token(m.bull_bear_supply)/2)}')
     if (m.lp.lt_supply != 0):
         print(
             f'Swap: {blue(m.lp.spotPrice(TokenType.ETH, TokenType.BULL))} {red(m.lp.spotPrice(TokenType.ETH, TokenType.BEAR))}')
@@ -48,5 +48,5 @@ def info(m) -> None:
         print("Cannot get NFT price, swap not initialized")
     else:
         print(
-            f'NFT Value: {round(m.lp.balances[TokenType.BEAR] / m.lp.balances[TokenType.BULL], 2)} ETH')
+            f'NFT Value: {(m.lp.balances[TokenType.BEAR] / m.lp.balances[TokenType.BULL]).sqrt()} ETH')
     print("_________________________________________________\n")
