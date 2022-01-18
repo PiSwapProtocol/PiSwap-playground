@@ -68,15 +68,16 @@ class LiquidityPool(Account):
 
     def adjustWeights(f):
         def decorator(self, account: Account, tokenIn: TokenType, tokenOut: TokenType, kind: SwapKind, amount: Decimal) -> Decimal:
-            priceBull = self.spotPrice(TokenType.ETH, TokenType.BULL)
-            priceBear = self.spotPrice(TokenType.ETH, TokenType.BEAR)
+            buy = True if tokenIn is TokenType.ETH else False
+            tradedToken = tokenOut if buy else tokenIn
+            price = self.spotPrice(TokenType.ETH, tradedToken.invert())
+            balance = self.balances[tradedToken.invert()]
 
             result = f(self, account, tokenIn, tokenOut, kind, amount)
 
             if (tokenIn is TokenType.ETH or tokenOut is TokenType.ETH):
-                newWeightEth = calculate_new_weights(
-                    priceBull, priceBear, self.balances[TokenType.BULL], self.balances[TokenType.BEAR], self.balances[TokenType.ETH])
-                self.eth_weight = newWeightEth
+                self.eth_weight = 1 / ((2 * balance * price) /
+                                       self.balances[TokenType.ETH] + 1)
             return result
         return decorator
 
@@ -104,8 +105,8 @@ class LiquidityPool(Account):
         weightIn = self.getWeight(tokenIn)
         weightOut = self.getWeight(tokenOut)
 
-        if (amountIn > balanceIn * self.MAX_RATIO):
-            raise Exception("MAX_RATIO")
+        # if (amountIn > balanceIn * self.MAX_RATIO):
+        #     raise Exception("MAX_RATIO")
 
         denominator = balanceIn + amountIn
         base = balanceIn / denominator
@@ -119,8 +120,8 @@ class LiquidityPool(Account):
         weightIn = self.getWeight(tokenIn)
         weightOut = self.getWeight(tokenOut)
 
-        if (amountOut > balanceOut * self.MAX_RATIO):
-            raise Exception("MAX_RATIO")
+        # if (amountOut > balanceOut * self.MAX_RATIO):
+        #     raise Exception("MAX_RATIO")
 
         base = balanceOut / (balanceOut - amountOut)
         exponent = weightOut / weightIn

@@ -1,10 +1,18 @@
 from enum import Enum
 
+
 class TokenType(Enum):
     ETH = 0
     BULL = 1
     BEAR = 2
     LIQUIDITY = 3
+
+    def invert(self):
+        if self is TokenType.ETH or self is TokenType.LIQUIDITY:
+            return self
+        else:
+            return TokenType.BULL if self is TokenType.BEAR else TokenType.BEAR
+
 
 class SwapKind(Enum):
     GIVEN_IN = 0

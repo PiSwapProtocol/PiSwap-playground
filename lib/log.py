@@ -48,5 +48,5 @@ def info(m) -> None:
         print("Cannot get NFT price, swap not initialized")
     else:
         print(
-            f'NFT Value: {(m.lp.balances[TokenType.BEAR] / m.lp.balances[TokenType.BULL]).sqrt()} ETH')
+            f'NFT Value: {(m.lp.balances[TokenType.BEAR] / m.lp.balances[TokenType.BULL])} ETH')
     print("_________________________________________________\n")
