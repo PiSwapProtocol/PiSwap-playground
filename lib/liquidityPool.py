@@ -1,10 +1,8 @@
-import math
 from decimal import Decimal, getcontext
 
 from lib.account import Account
 from lib.formula import *
 from lib.types import SwapKind, TokenType
-from lib.utils import complement
 
 getcontext().prec = 18
 
@@ -12,9 +10,7 @@ getcontext().prec = 18
 class LiquidityPool(Account):
     def __init__(self):
         super().__init__("Swap", 0)
-        self.MAX_RATIO = Decimal("0.3")
         self.lt_supply = Decimal(0)
-        self.eth_weight = Decimal(1/3)
 
     def initializePool(self, account: Account, amount: Decimal, amount_bull: Decimal, amount_bear: Decimal) -> Decimal:
         if self.lt_supply != 0:
@@ -66,22 +62,33 @@ class LiquidityPool(Account):
         self.transfer(TokenType.BEAR, account, amount_bear)
         return amount_eth, amount_bull, amount_bear
 
-    def adjustWeights(f):
+    def lockLiquidity(f):
         def decorator(self, account: Account, tokenIn: TokenType, tokenOut: TokenType, kind: SwapKind, amount: Decimal) -> Decimal:
-            buy = True if tokenIn is TokenType.ETH else False
-            tradedToken = tokenOut if buy else tokenIn
-            price = self.spotPrice(TokenType.ETH, tradedToken.invert())
-            balance = self.balances[tradedToken.invert()]
+            (firstToken, tradedToken) = (
+                tokenIn, tokenOut) if tokenIn.value < tokenOut.value else (tokenOut, tokenIn)
+
+            # only adjust weights if first token is ETH, then tradedToken is BULL or BEAR
+            if firstToken is TokenType.ETH:
+                nonTradedToken = TokenType.BULL if tradedToken is TokenType.BEAR else TokenType.BEAR
+                (reserveBefore, _) = self.getReserves(
+                    firstToken, nonTradedToken)
 
             result = f(self, account, tokenIn, tokenOut, kind, amount)
 
-            if (tokenIn is TokenType.ETH or tokenOut is TokenType.ETH):
-                self.eth_weight = 1 / ((2 * balance * price) /
-                                       self.balances[TokenType.ETH] + 1)
+            if (firstToken is TokenType.ETH):
+                (reserveAfter, _) = self.getReserves(
+                    firstToken, nonTradedToken)
+                # half of the liquidity added through the fee is minted to the protocol
+                adjustedReserve = reserveBefore + \
+                    (reserveAfter - reserveBefore) / 2
+                impact = (reserveAfter / adjustedReserve) - 1
+                liquidityMinted = self.lt_supply * impact
+                self.mint(TokenType.LIQUIDITY, liquidityMinted)
+                self.lt_supply += liquidityMinted
             return result
         return decorator
 
-    @adjustWeights
+    @lockLiquidity
     def swap(self, account: Account, tokenIn: TokenType, tokenOut: TokenType, kind: SwapKind, amount: Decimal) -> Decimal:
         if tokenIn == TokenType.LIQUIDITY or tokenOut == TokenType.LIQUIDITY:
             raise Exception("Cannot swap liquidity tokens")
@@ -100,50 +107,36 @@ class LiquidityPool(Account):
             return amountIn
 
     def calcOutGivenIn(self, tokenIn: TokenType, tokenOut: TokenType, amountIn: Decimal) -> Decimal:
-        balanceIn = self.balances[tokenIn]
-        balanceOut = self.balances[tokenOut]
-        weightIn = self.getWeight(tokenIn)
-        weightOut = self.getWeight(tokenOut)
-
-        # if (amountIn > balanceIn * self.MAX_RATIO):
-        #     raise Exception("MAX_RATIO")
-
-        denominator = balanceIn + amountIn
-        base = balanceIn / denominator
-        exponent = weightIn / weightOut
-        power = base**exponent
-        return balanceOut * complement(power)
+        reserveIn, reserveOut = self.getReserves(tokenIn, tokenOut)
+        amountInWithFee = (amountIn * reserveIn) / (amountIn + reserveIn)
+        numerator = amountInWithFee * reserveOut
+        denominator = reserveIn + amountInWithFee
+        return numerator / denominator
 
     def calcInGivenOut(self, tokenIn: TokenType, tokenOut: TokenType, amountOut: Decimal) -> Decimal:
-        balanceIn = self.balances[tokenIn]
-        balanceOut = self.balances[tokenOut]
-        weightIn = self.getWeight(tokenIn)
-        weightOut = self.getWeight(tokenOut)
+        reserveIn, reserveOut = self.getReserves(tokenIn, tokenOut)
+        numerator = reserveIn * amountOut
+        denominator = (reserveOut - amountOut)
+        amountWithFee = numerator / denominator
+        amountIn = (amountWithFee * reserveIn) / (reserveIn - amountWithFee)
+        return amountIn
 
-        # if (amountOut > balanceOut * self.MAX_RATIO):
-        #     raise Exception("MAX_RATIO")
+    def getReserves(self, tokenIn: TokenType, tokenOut: TokenType) -> Decimal:
+        reserveIn = self.balances[tokenIn]
+        reserveOut = self.balances[tokenOut]
+        if (tokenIn == TokenType.ETH):
+            ratio = 1 - self.balances[tokenOut] / \
+                (self.balances[TokenType.BULL] + self.balances[TokenType.BEAR])
+            reserveIn = reserveIn * ratio
+        elif (tokenOut == TokenType.ETH):
+            ratio = 1 - self.balances[tokenIn] / \
+                (self.balances[TokenType.BULL] + self.balances[TokenType.BEAR])
+            reserveOut = reserveOut * ratio
 
-        base = balanceOut / (balanceOut - amountOut)
-        exponent = weightOut / weightIn
-        power = base**exponent
-        ratio = power - 1
-
-        return balanceIn * ratio
+        return (reserveIn, reserveOut)
 
     def spotPrice(self, tokenIn: TokenType, tokenOut: TokenType) -> Decimal:
         if tokenIn == TokenType.LIQUIDITY or tokenOut == TokenType.LIQUIDITY:
             raise Exception("Cannot swap liquidity tokens")
-
-        balanceIn = self.balances[tokenIn]
-        balanceOut = self.balances[tokenOut]
-        weightIn = self.getWeight(tokenIn)
-        weightOut = self.getWeight(tokenOut)
-        a = balanceIn / weightIn
-        b = balanceOut / weightOut
-        return a/b
-
-    def getWeight(self, token: TokenType) -> Decimal:
-        if token is TokenType.ETH:
-            return self.eth_weight
-        else:
-            return Decimal((1 - self.eth_weight) / 2)
+        (reserveIn, reserveOut) = self.getReserves(tokenIn, tokenOut)
+        return reserveIn / reserveOut

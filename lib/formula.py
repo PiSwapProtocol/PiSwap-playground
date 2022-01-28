@@ -11,7 +11,3 @@ def token_formula(x: Decimal) -> Decimal:
 
 def inverse_token_formula(y: Decimal) -> Decimal:
     return (factor*stretch)/(factor-y) - stretch
-
-
-def price_for_1_token(y: Decimal) -> Decimal:
-    return inverse_token_formula(y+1) - inverse_token_formula(y)

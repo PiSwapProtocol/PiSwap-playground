@@ -28,21 +28,34 @@ def bold(text) -> str:
 
 
 def info(m) -> None:
+    if m.lp.lt_supply != 0:
+        bullPrice = m.lp.spotPrice(TokenType.ETH, TokenType.BULL)
+        bearPrice = m.lp.spotPrice(TokenType.ETH, TokenType.BEAR)
+        (ethPoolBull, bullPool) = m.lp.getReserves(
+            TokenType.ETH, TokenType.BULL)
+        (ethPoolBear, bearPool) = m.lp.getReserves(
+            TokenType.ETH, TokenType.BEAR)
     print(bold(f"Token price"))
+    supply = m.bull_bear_supply
     print(
-        f'Mint: {blue(price_for_1_token(m.bull_bear_supply)/2)} {red(price_for_1_token(m.bull_bear_supply)/2)}')
+        f'Mint: {blue(inverse_token_formula(supply)/(supply * 2))} {red(inverse_token_formula(supply)/(supply * 2))}')
     if (m.lp.lt_supply != 0):
-        print(
-            f'Swap: {blue(m.lp.spotPrice(TokenType.ETH, TokenType.BULL))} {red(m.lp.spotPrice(TokenType.ETH, TokenType.BEAR))}')
+        print(f'Swap: {blue(bullPrice)} {red(bearPrice)}')
     print("_________________________________________________\n")
-    if (m.lp.balances[TokenType.ETH] != 0):
+    if (m.lp.lt_supply != 0):
         print(bold(f"Pool sizes"))
+        print(f'')
         print(
-            f'ETH: {m.lp.balances[TokenType.ETH]} tokens / Weight {m.lp.getWeight(TokenType.ETH)}')
+            f'ETH: {ethPoolBull} ETH / {blue("BULL")}: {bullPool} tokens')
         print(
-            f'{blue("BULL")}: {m.lp.balances[TokenType.BULL]} tokens / Weight {m.lp.getWeight(TokenType.BULL)}')
+            f'ETH: {ethPoolBear} ETH / {red("BEAR")}: {bearPool} tokens')
+        print("_________________________________________________\n")
+        totalValue = bullPrice * bullPool + bearPrice * \
+            bearPool + ethPoolBull + ethPoolBear
+        print(f'{bold("Amount liquidity held by pool")}: {totalValue} ETH')
+        lockedPercentage = m.lp.balances[TokenType.LIQUIDITY] / m.lp.lt_supply
         print(
-            f'{red("BEAR")}: {m.lp.balances[TokenType.BEAR]} tokens / Weight {m.lp.getWeight(TokenType.BEAR)}')
+            f'{bold("Amount liquidity held by pool")}: {lockedPercentage * 100} % / {lockedPercentage * totalValue} ETH')
         print("_________________________________________________\n")
     if (m.lp.balances[TokenType.ETH] == 0):
         print("Cannot get NFT price, swap not initialized")

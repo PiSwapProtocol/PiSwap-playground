@@ -22,7 +22,6 @@ class PiSwapMarket(Account):
         def decorator(self, account: Account, *args, log=True, txLog=None, simulate=False, **kwargs):
             swap_balance = self.balances.copy()
             lp_balance = self.lp.balances.copy()
-            weight = self.lp.eth_weight
             investor_balance = account.balances.copy()
             result = None
             try:
@@ -37,14 +36,12 @@ class PiSwapMarket(Account):
                     # restore balances
                     self.balances = swap_balance
                     self.lp.balances = lp_balance
-                    self.lp.eth_weight = weight
                     account.balances = investor_balance
             except Exception as e:
                 print(get_traceback(e))
                 # restore balances
                 self.balances = swap_balance
                 self.lp.balances = lp_balance
-                self.lp.eth_weight = weight
                 account.balances = investor_balance
             return result
         return decorator
