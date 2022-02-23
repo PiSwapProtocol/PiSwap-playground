@@ -1,4 +1,5 @@
 from decimal import Decimal, getcontext
+from typing import Tuple
 
 from lib.account import Account
 from lib.formula import *
@@ -34,10 +35,11 @@ class LiquidityPool(Account):
             self.balances[TokenType.BULL]
         bull_ratio = self.balances[TokenType.BULL] / total_pool_size
 
-        minted_token_amount = total_pool_size * \
-            amount / self.balances[TokenType.ETH]
         liquidity_minted = amount * self.lt_supply / \
             self.balances[TokenType.ETH]
+        minted_token_amount = total_pool_size * \
+            amount / self.balances[TokenType.ETH]
+
         amount_bull = minted_token_amount * bull_ratio
         amount_bear = minted_token_amount - amount_bull
 
@@ -48,7 +50,7 @@ class LiquidityPool(Account):
         self.lt_supply += liquidity_minted
         return liquidity_minted
 
-    def removeLiquidity(self, account: Account, amount_lt: Decimal) -> Decimal:
+    def removeLiquidity(self, account: Account, amount_lt: Decimal) -> Tuple[Decimal, Decimal, Decimal]:
         liquidity_removed = amount_lt / self.lt_supply
 
         amount_eth = self.balances[TokenType.ETH] * liquidity_removed
@@ -94,7 +96,6 @@ class LiquidityPool(Account):
             raise Exception("Cannot swap liquidity tokens")
         if tokenIn == tokenOut:
             raise Exception("Cannot swap same token")
-
         if kind == SwapKind.GIVEN_IN:
             amountOut = self.calcOutGivenIn(tokenIn, tokenOut, amount)
             account.transfer(tokenIn, self, amount)
@@ -117,11 +118,15 @@ class LiquidityPool(Account):
         reserveIn, reserveOut = self.getReserves(tokenIn, tokenOut)
         numerator = reserveIn * amountOut
         denominator = (reserveOut - amountOut)
-        amountWithFee = numerator / denominator
-        amountIn = (amountWithFee * reserveIn) / (reserveIn - amountWithFee)
+        amountInWithOutFee = numerator / denominator
+        'todo amount in cannot be greater than reserve in'
+        if (amountInWithOutFee >= reserveIn):
+            raise Exception("Amount in exceeds reserve in")
+        amountIn = (amountInWithOutFee * reserveIn) / \
+            (reserveIn - amountInWithOutFee)
         return amountIn
 
-    def getReserves(self, tokenIn: TokenType, tokenOut: TokenType) -> Decimal:
+    def getReserves(self, tokenIn: TokenType, tokenOut: TokenType) -> Tuple[Decimal, Decimal]:
         reserveIn = self.balances[tokenIn]
         reserveOut = self.balances[tokenOut]
         if (tokenIn == TokenType.ETH):
@@ -140,3 +145,6 @@ class LiquidityPool(Account):
             raise Exception("Cannot swap liquidity tokens")
         (reserveIn, reserveOut) = self.getReserves(tokenIn, tokenOut)
         return reserveIn / reserveOut
+
+    def nftValue(self) -> Decimal:
+        return ((self.balances[TokenType.BEAR] / self.balances[TokenType.BULL]))**2
