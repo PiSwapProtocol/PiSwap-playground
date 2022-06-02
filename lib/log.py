@@ -40,8 +40,10 @@ def info(m) -> None:
         (ethPoolBear, bearPool) = m.lp.getReserves(
             TokenType.ETH, TokenType.BEAR)
     print(bold(f"Token price"))
+    bullMint = m.spotPrice(TokenType.BULL)
+    bearMint = m.spotPrice(TokenType.BEAR)
     print(
-        f'Mint: {blue(m.spotPrice()/2)} {red(m.spotPrice()/2)} | combined {green(m.spotPrice())}')
+        f'Mint: {blue(bullMint)} {red(bearMint)} | combined {green(bullMint + bearMint)} | NFT Value {bold(bullMint / bearMint)} ETH')
     if (m.lp.lt_supply != 0):
         print(
             f'Swap: {blue(bullPrice)} {red(bearPrice)} | combined {green(bullPrice+bearPrice)}')

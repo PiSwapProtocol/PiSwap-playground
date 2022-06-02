@@ -9,6 +9,8 @@ getcontext().prec = 18
 
 
 class LiquidityPool(Account):
+    _feeEnabled = True
+
     def __init__(self):
         super().__init__("Swap", 0)
         self.lt_supply = Decimal(0)
@@ -77,7 +79,7 @@ class LiquidityPool(Account):
 
             result = f(self, account, tokenIn, tokenOut, kind, amount)
 
-            if (firstToken is TokenType.ETH):
+            if (firstToken is TokenType.ETH and self.feeEnabled):
                 (reserveAfter, _) = self.getReserves(
                     firstToken, nonTradedToken)
                 # half of the liquidity added through the fee is minted to the protocol
@@ -90,7 +92,7 @@ class LiquidityPool(Account):
             return result
         return decorator
 
-    @lockLiquidity
+    # @lockLiquidity
     def swap(self, account: Account, tokenIn: TokenType, tokenOut: TokenType, kind: SwapKind, amount: Decimal) -> Decimal:
         if tokenIn == TokenType.LIQUIDITY or tokenOut == TokenType.LIQUIDITY:
             raise Exception("Cannot swap liquidity tokens")
@@ -109,33 +111,37 @@ class LiquidityPool(Account):
 
     def calcOutGivenIn(self, tokenIn: TokenType, tokenOut: TokenType, amountIn: Decimal) -> Decimal:
         reserveIn, reserveOut = self.getReserves(tokenIn, tokenOut)
-        amountInWithFee = (amountIn * reserveIn) / (amountIn + reserveIn)
-        numerator = amountInWithFee * reserveOut
-        denominator = reserveIn + amountInWithFee
+        if (self.feeEnabled):
+            amountIn = (amountIn * reserveIn) / (amountIn + reserveIn)
+        numerator = amountIn * reserveOut
+        denominator = reserveIn + amountIn
         return numerator / denominator
 
     def calcInGivenOut(self, tokenIn: TokenType, tokenOut: TokenType, amountOut: Decimal) -> Decimal:
         reserveIn, reserveOut = self.getReserves(tokenIn, tokenOut)
         numerator = reserveIn * amountOut
         denominator = (reserveOut - amountOut)
-        amountInWithOutFee = numerator / denominator
-        'todo amount in cannot be greater than reserve in'
-        if (amountInWithOutFee >= reserveIn):
-            raise Exception("Amount in exceeds reserve in")
-        amountIn = (amountInWithOutFee * reserveIn) / \
-            (reserveIn - amountInWithOutFee)
+        amountIn = numerator / denominator
+        if (self.feeEnabled):
+            'todo amount in cannot be greater than reserve in'
+            if (amountIn >= reserveIn):
+                raise Exception("Amount in exceeds reserve in")
+            amountIn = (amountIn * reserveIn) / (reserveIn - amountIn)
+
         return amountIn
 
     def getReserves(self, tokenIn: TokenType, tokenOut: TokenType) -> Tuple[Decimal, Decimal]:
         reserveIn = self.balances[tokenIn]
         reserveOut = self.balances[tokenOut]
         if (tokenIn == TokenType.ETH):
-            ratio = 1 - self.balances[tokenOut] / \
-                (self.balances[TokenType.BULL] + self.balances[TokenType.BEAR])
+            ratio = self.balances[tokenOut]**2 / \
+                (self.balances[TokenType.BULL]**2 +
+                 self.balances[TokenType.BEAR]**2)
             reserveIn = reserveIn * ratio
         elif (tokenOut == TokenType.ETH):
-            ratio = 1 - self.balances[tokenIn] / \
-                (self.balances[TokenType.BULL] + self.balances[TokenType.BEAR])
+            ratio = self.balances[tokenIn]**2 / \
+                (self.balances[TokenType.BULL]**2 +
+                 self.balances[TokenType.BEAR]**2)
             reserveOut = reserveOut * ratio
 
         return (reserveIn, reserveOut)
@@ -147,4 +153,14 @@ class LiquidityPool(Account):
         return reserveIn / reserveOut
 
     def nftValue(self) -> Decimal:
-        return ((self.balances[TokenType.BEAR] / self.balances[TokenType.BULL]))**2
+        bull = self.balances[TokenType.BULL]
+        bear = self.balances[TokenType.BEAR]
+        return (bull / bear)
+
+    @property
+    def feeEnabled(self):
+        return self.__class__._feeEnabled
+
+    @feeEnabled.setter
+    def feeEnabled(self, value):
+        self.__class__._feeEnabled = value

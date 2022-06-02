@@ -17,15 +17,12 @@ class PiSwapMarket(Account):
     def __init__(self):
         super().__init__("Market", 0)
         self.lp = LiquidityPool()
-        self.bull_bear_supply = 0
+        self.bull_supply = 0
+        self.bear_supply = 0
 
     def failsafe(f):
         def decorator(self, account: Account, *args, log=True, txLog=None, simulate=False, **kwargs):
-            swap_balance = self.balances.copy()
-            lp_balance = self.lp.balances.copy()
-            investor_balance = account.balances.copy()
-            lt_supply = self.lp.lt_supply
-            supply = self.bull_bear_supply
+            snapshot = self.createSnapshot(account)
             result = None
             try:
                 # enable / disable transaction logging
@@ -36,40 +33,81 @@ class PiSwapMarket(Account):
                     print()
                     l.info(self)
                 if simulate:
-                    # restore balances
-                    self.balances = swap_balance
-                    self.lp.balances = lp_balance
-                    account.balances = investor_balance
-                    self.lp.lt_supply = lt_supply
-                    self.bull_bear_supply = supply
+                    self.restoreSnapshot(account, snapshot)
             except Exception as e:
                 print(get_traceback(e))
-                # restore balances
-                self.balances = swap_balance
-                self.lp.balances = lp_balance
-                account.balances = investor_balance
-                self.lp.lt_supply = lt_supply
-                self.bull_bear_supply = supply
+                self.restoreSnapshot(account, snapshot)
             return result
         return decorator
 
     @failsafe
-    def mint(self, account: Account, kind: SwapKind, amount) -> Decimal:
+    # def mint(self, account: Account, kind: SwapKind, amount) -> Decimal:
+    def mint(self, account: Account, nftValue, amount) -> Tuple[Decimal, Decimal]:
         amount = Decimal(amount)
-        amount2 = self.calcMintBurn(True, kind, amount)
-        (amountIn, amountOut) = (
-            amount, amount2) if kind == SwapKind.GIVEN_IN else (amount2, amount)
-        account.transfer(TokenType.ETH, self, amountIn)
-        self.__mint(account, amountOut)
-        return amount2
+        nftValue = Decimal(nftValue)
+        # amount2 = self.calcMintBurn(True, kind, amount)
+        # (amountIn, amountOut) = (
+        #     amount, amount2) if kind == SwapKind.GIVEN_IN else (amount2, amount)
+        # account.transfer(TokenType.ETH, self, amountIn)
+        # self.__mint(account, amountOut)
+        # return amount2
+        # adjust = 2 * nftValue / (nftValue ** 2 + 1)
+
+        factor = self.__factor(nftValue, amount, account)
+        amountBull = amount * factor * nftValue.sqrt()
+        amountBear = amount * factor / nftValue.sqrt()
+
+        account.transfer(TokenType.ETH, self, amount)
+        account.mint(TokenType.BULL, amountBull)
+        self.bull_supply += amountBull
+        account.mint(TokenType.BEAR, amountBear)
+        self.bear_supply += amountBear
+
+        return amountBull, amountBear
+
+    def __factor(self, nftValue: Decimal, amountIn: Decimal, account: Account) -> Decimal:
+        totalEth = self.balances[TokenType.ETH] + amountIn
+        balanceBull = account.balances[TokenType.BULL]
+        balanceBear = account.balances[TokenType.BEAR]
+
+        a = (amountIn ** 2) * (nftValue + 1/nftValue)
+        z = (amountIn + balanceBull * self.spotPrice(TokenType.BULL) +
+             balanceBear * self.spotPrice(TokenType.BEAR)) / totalEth
+        div = a * (1 - z)
+        if (div == 0):
+            return Decimal(1)
+
+        b = amountIn * ((balanceBull + self.bull_supply) * nftValue.sqrt() +
+                        (balanceBear + self.bear_supply) / nftValue.sqrt())
+        c = balanceBull * self.bull_supply + balanceBear * self.bear_supply
+        e = 2 * amountIn * (self.bull_supply * nftValue.sqrt() +
+                            self.bear_supply / nftValue.sqrt())
+        f = self.bull_supply ** 2 + self.bear_supply ** 2
+
+        p = (b - e * z) / div
+        q = (c - f * z) / div
+
+        return -p/2 + (p ** 2 / 4 - q).sqrt()
 
     @failsafe
-    def burn(self, account: Account, kind: SwapKind, amount) -> Decimal:
-        amount = Decimal(amount)
-        amount2 = self.calcMintBurn(False, kind, amount)
-        (amountIn, amountOut) = (
-            amount, amount2) if kind == SwapKind.GIVEN_IN else (amount2, amount)
-        self.__burn(account, amountIn)
+    # , kind: SwapKind, amount) -> Decimal:
+    def burn(self, account: Account, percent) -> Decimal:
+        percent = Decimal(percent)
+        # amount = Decimal(amount)
+        # amount2 = self.calcMintBurn(False, kind, amount)
+        # (amountIn, amountOut) = (
+        #     amount, amount2) if kind == SwapKind.GIVEN_IN else (amount2, amount)
+        # self.__burn(account, amountIn)
+        # self.transfer(TokenType.ETH, account, amountOut)
+        amountBull = account.balances[TokenType.BULL] * percent
+        amountBear = account.balances[TokenType.BEAR] * percent
+        bullPrice = self.spotPrice(TokenType.BULL)
+        bearPrice = self.spotPrice(TokenType.BEAR)
+        amountOut = amountBull * bullPrice + amountBear * bearPrice
+        account.burn(TokenType.BULL, amountBull)
+        self.bull_supply -= amountBull
+        account.burn(TokenType.BEAR, amountBear)
+        self.bear_supply -= amountBear
         self.transfer(TokenType.ETH, account, amountOut)
         return amountOut
 
@@ -107,8 +145,15 @@ class PiSwapMarket(Account):
             amount2 = total_eth_after - self.balances[TokenType.ETH]
         return amount2 if mint else amount2 * -1
 
-    def spotPrice(self) -> Decimal:
-        return (stretchFactor + self.balances[TokenType.ETH]) ** 2 / (stretchFactor * maxSupply)
+    def spotPrice(self, token: TokenType) -> Decimal:
+        denominator = self.bull_supply ** 2 + self.bear_supply ** 2
+        if (denominator == 0):
+            return Decimal(0)
+        if (token == TokenType.BULL):
+            return self.balances[TokenType.ETH] * self.bull_supply / denominator
+        if (token == TokenType.BEAR):
+            return self.balances[TokenType.ETH] * self.bear_supply / denominator
+        return 0
 
     def getMaxAmountBurnable(self) -> Decimal:
         '''
@@ -129,21 +174,32 @@ class PiSwapMarket(Account):
         lockedEth = lockedEth * lockedLiquidity
         lockedToken = lockedToken * lockedLiquidity
 
-        # amount of ETH pooled through minting of bull and bear tokens
-        totalLockedEth = self.balances[TokenType.ETH]
-
         # calculate the amount of tokens to swap to receive the maximum amount of ETH
         amountTokensToSwap = (lockedEth*(lockedToken**2)-maxSupply*lockedEth*lockedToken - stretchFactor*maxSupply*lockedToken + maxSupply * (maxSupply * stretchFactor * lockedEth * lockedToken).sqrt()) / \
             (stretchFactor * maxSupply - lockedEth * lockedToken)
 
         return lockedToken + amountTokensToSwap
 
-    def __mint(self, account: Account, amount: Decimal) -> None:
-        account.mint(TokenType.BULL, amount)
-        account.mint(TokenType.BEAR, amount)
-        self.bull_bear_supply += amount
+    def nftValue(self) -> Decimal:
+        return self.bull_supply / self.bear_supply
 
-    def __burn(self, account: Account, amount: Decimal) -> None:
-        account.burn(TokenType.BULL, amount)
-        account.burn(TokenType.BEAR, amount)
-        self.bull_bear_supply -= amount
+    def log(self):
+        l.info(self)
+
+    def createSnapshot(self, account: Account):
+        return {
+            "swap_balance": self.balances.copy(),
+            "lp_balance": self.lp.balances.copy(),
+            "investor_balance": account.balances.copy(),
+            "lt_supply": self.lp.lt_supply,
+            "bull_supply": self.bull_supply,
+            "bear_supply": self.bear_supply
+        }
+
+    def restoreSnapshot(self, account: Account, snapshot):
+        self.balances = snapshot["swap_balance"]
+        self.lp.balances = snapshot["lp_balance"]
+        account.balances = snapshot["investor_balance"]
+        self.lp.lt_supply = snapshot["lt_supply"]
+        self.bull_supply = snapshot["bull_supply"]
+        self.bear_supply = snapshot["bear_supply"]
